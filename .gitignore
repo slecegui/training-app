@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/*.egg-info/
+htmlcov/
+
+# Imported training files (kept locally / Docker volume)
+storage/uploads/
+!storage/uploads/.gitkeep
+
+# Editors and operating systems
+.DS_Store
+.vscode/
+.idea/
