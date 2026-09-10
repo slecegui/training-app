@@ -1,16 +1,157 @@
-import { ChangeEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
+import { User } from './types'
+import { request, jsonHeaders, errorText, useLocation } from './utils'
+import { Input } from './components/Common'
+import { Sidebar } from './components/Sidebar'
+import { ObjectivesPage } from './pages/ObjectivesPage'
+import { ObjectiveDetailPage } from './pages/ObjectiveDetailPage'
+import { ActivitiesPage } from './pages/ActivitiesPage'
+import { ProfilePage } from './pages/ProfilePage'
+import { GoalForm } from './components/GoalForm'
+import { HomePage } from './pages/HomePage'
 import './styles.css'
-type Activity = { id:number; name:string; sport:string; started_at:string|null; duration_seconds:number|null; distance_meters:number|null; elevation_gain_meters:number|null; average_heart_rate:number|null; average_power:number|null; average_cadence:number|null; calories:number|null; source_format:string }
-const api = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api'
-const duration = (s:number|null) => s ? `${Math.floor(s/3600)} h ${String(Math.floor(s%3600/60)).padStart(2,'0')} min` : '—'
-const distance = (m:number|null) => m ? `${(m/1000).toFixed(1)} km` : '—'
+
 export function App() {
- const [activities,setActivities]=useState<Activity[]>([]); const [selected,setSelected]=useState<Activity|null>(null); const [message,setMessage]=useState('')
- const load=async()=>{try {const r=await fetch(`${api}/activities?user_id=1`); const data=await r.json(); setActivities(data);setSelected(c=>c??data[0]??null)} catch {setMessage('No se pudo conectar con la API.')}}
- // The initial request is an intentional external synchronization.
- // eslint-disable-next-line react-hooks/set-state-in-effect
- useEffect(()=>{void load()},[])
- const upload=async(e:ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setMessage('Importando actividad…');const form=new FormData();form.append('file',file);const r=await fetch(`${api}/activities/import?user_id=1`,{method:'POST',body:form});if(r.ok){const item=await r.json();setSelected(item);setMessage('Actividad importada correctamente.');await load()}else{const error=await r.json();setMessage(error.detail??'No se pudo importar el archivo.')}e.target.value=''}
- return <main className="app"><header><div><p className="eyebrow">TRAINING ONLINE</p><h1>Tu entrenamiento, claro.</h1><p className="subtitle">Revisa tus sesiones y encuentra el pulso de tu progreso.</p></div><label className="import">Importar FIT, TCX o GPX<input type="file" accept=".fit,.tcx,.gpx" onChange={upload}/></label></header>{message&&<p className="message">{message}</p>}<section className="summary"><article><span>Actividades</span><strong>{activities.length}</strong></article><article><span>Distancia total</span><strong>{(activities.reduce((s,x)=>s+(x.distance_meters??0),0)/1000).toFixed(1)} km</strong></article><article><span>Tiempo activo</span><strong>{duration(activities.reduce((s,x)=>s+(x.duration_seconds??0),0))}</strong></article></section><section className="content"><div className="list"><div className="section-title"><h2>Actividad reciente</h2><span>{activities.length} sesiones</span></div>{activities.map(x=><button className={`activity ${selected?.id===x.id?'active':''}`} key={x.id} onClick={()=>setSelected(x)}><span className="sport">{x.sport.slice(0,1)}</span><span className="activity-name"><b>{x.name}</b><small>{x.started_at?new Date(x.started_at).toLocaleDateString('es-ES',{day:'numeric',month:'short'}):'Sin fecha'} · {x.sport}</small></span><span><b>{distance(x.distance_meters)}</b><small>{duration(x.duration_seconds)}</small></span></button>)}</div><aside>{selected?<><p className="eyebrow">DETALLE DE ACTIVIDAD</p><h2>{selected.name}</h2><p className="date">{selected.started_at?new Date(selected.started_at).toLocaleString('es-ES',{dateStyle:'full',timeStyle:'short'}):'Fecha no disponible'}</p><div className="metrics"><Metric label="Distancia" value={distance(selected.distance_meters)}/><Metric label="Duración" value={duration(selected.duration_seconds)}/><Metric label="Desnivel" value={selected.elevation_gain_meters?`${Math.round(selected.elevation_gain_meters)} m`:'—'}/><Metric label="FC media" value={selected.average_heart_rate?`${selected.average_heart_rate} ppm`:'—'}/><Metric label="Potencia media" value={selected.average_power?`${selected.average_power} W`:'—'}/><Metric label="Cadencia media" value={selected.average_cadence?`${selected.average_cadence} rpm`:'—'}/><Metric label="Calorías" value={selected.calories?`${selected.calories} kcal`:'—'}/></div><p className="source">Origen: {selected.source_format.toUpperCase()}</p></>:<p>Aún no hay actividades.</p>}</aside></section></main>
+  const [user, setUser] = useState<User | null>(null)
+  const [checking, setChecking] = useState(true)
+  const [message, setMessage] = useState('')
+  const [path, navigate] = useLocation()
+  const logout = async () => {
+    const response = await request('/auth/logout', { method: 'POST' })
+    if (!response.ok) return setMessage(await errorText(response))
+    setUser(null); setMessage(''); navigate('/')
+  }
+
+  // Fetch session on startup
+  useEffect(() => {
+    void request('/auth/session')
+      .then(async (response) => {
+        if (response.ok) {
+          setUser(await response.json())
+        }
+      })
+      .finally(() => setChecking(false))
+  }, [])
+
+  // Redirect to objectives page on login/startup if at root
+  useEffect(() => {
+    if (user && (path === '/' || path === '/index.html')) {
+      navigate('/home')
+    }
+  }, [user, path, navigate])
+
+  if (checking) {
+    return <main className="auth-shell">Comprobando sesión…</main>
+  }
+
+  if (!user) {
+    return <Auth onAuthenticated={setUser} message={message} setMessage={setMessage} />
+  }
+
+  // Handle routing matching
+  const renderContent = () => {
+    if (path === '/home') return <HomePage user={user} />
+    if (path === '/objectives') {
+      return <ObjectivesPage setMessage={setMessage} />
+    }
+    if (path === '/objectives/new') {
+      return (
+        <section className="panel">
+          <h2>🎯 Crear Nuevo Objetivo Estructurado</h2>
+          <p className="subtitle" style={{ marginBottom: '1.5rem' }}>Configura los datos del reto y el método de éxito esperado.</p>
+          <GoalForm
+            onSuccess={() => navigate('/objectives')}
+            onCancel={() => navigate('/objectives')}
+            setMessage={setMessage}
+          />
+        </section>
+      )
+    }
+    if (path.startsWith('/objectives/')) {
+      const parts = path.split('/')
+      const goalId = parts[2]
+      if (goalId) {
+        return <ObjectiveDetailPage goalId={goalId} setMessage={setMessage} />
+      }
+    }
+    if (path === '/activities') {
+      return <ActivitiesPage setMessage={setMessage} />
+    }
+    if (path === '/profile') {
+      return <ProfilePage setMessage={setMessage} />
+    }
+
+    // Default Fallback
+    return <ObjectivesPage setMessage={setMessage} />
+  }
+
+  return (
+    <div className="main-layout">
+      {/* 1. Sidebar Left */}
+      <Sidebar userName={user.name} />
+
+      {/* 2. Central Content Area */}
+      <main className="app-container">
+        <header className="topbar"><div className="topbar-context">Planificador ciclista</div><div className="topbar-user"><span className="avatar small">{user.name.slice(0, 1).toUpperCase()}</span><button className="secondary" type="button" onClick={() => void logout()}>Cerrar sesión</button></div></header>
+        {message && (
+          <div className="message" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{message}</span>
+            <button
+              type="button"
+              style={{ border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem', color: '#17251e' }}
+              onClick={() => setMessage('')}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {renderContent()}
+      </main>
+    </div>
+  )
 }
-function Metric({label,value}:{label:string;value:string}) {return <div><span>{label}</span><strong>{value}</strong></div>}
+
+function Auth({ onAuthenticated, message, setMessage }: { onAuthenticated: (user: User) => void; message: string; setMessage: (value: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = Object.fromEntries(new FormData(event.currentTarget))
+    const response = await request(`/auth/${mode}`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      return setMessage(await errorText(response))
+    }
+    onAuthenticated(await response.json())
+    setMessage('')
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <p className="eyebrow">TRAINING ONLINE</p>
+        <h1>Entrena con dirección.</h1>
+        <p className="subtitle">Tu perfil, objetivos y actividades en un espacio privado centrado en metas.</p>
+        <form onSubmit={submit}>
+          {mode === 'register' && <Input name="name" label="Nombre" minLength={2} required />}
+          <Input name="email" label="Email" type="email" required />
+          <Input name="password" label="Contraseña" type="password" minLength={10} required />
+          <button className="primary" type="submit">
+            {mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
+          </button>
+        </form>
+        {message && <p className="message error" style={{ marginTop: '1rem' }}>{message}</p>}
+        <button
+          className="link-button"
+          type="button"
+          onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setMessage('') }}
+        >
+          {mode === 'login' ? 'Crear una cuenta' : 'Ya tengo una cuenta'}
+        </button>
+      </section>
+    </main>
+  )
+}
