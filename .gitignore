@@ -27,3 +27,4 @@ storage/uploads/
 .DS_Store
 .vscode/
 .idea/
+.aider*

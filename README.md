@@ -1,54 +1,78 @@
 # Training Online
 
-Primera versión ejecutable para importar y consultar actividades deportivas. Incluye API FastAPI, React + Vite, PostgreSQL, migraciones Alembic y almacenamiento local de archivos originales.
+Training Online es un planificador ciclista multiusuario. Esta entrega cierra los hitos
+verticales: **Planificación Semanal**, **Vinculación plan–realizado** y **Cumplimiento Determinista y Explicable**. Cuenta con persistencia versionada de planes, resultados y compliance,
+reglas de negocio deterministas en Python, API autenticada, interfaz de usuario interactiva,
+migraciones Alembic y un robusto conjunto de pruebas unitarias y de aislamiento de datos. La integración avanzada con IA aún está pendiente.
 
-## Requisitos
+## Requisitos y puesta en marcha
 
-- Node.js 20 o superior
-- Docker y Docker Compose
-
-## Puesta en marcha local
-
-Copiar las variables de ejemplo y ajustar `POSTGRES_PASSWORD`:
+- Docker y Docker Compose, o Python 3.12, PostgreSQL y Node.js 20 o superior.
+- Copia `.env.example` a `.env` y cambia al menos `POSTGRES_PASSWORD` y `SESSION_SECRET`.
 
 ```bash
 cp .env.example .env
-```
-
-Construir e iniciar todos los servicios:
-
-```bash
 docker compose up --build -d
 ```
 
-Abrir `http://localhost:5173`. La interfaz carga tres actividades de demostración para el usuario con id `1`; no hace falta importar archivos para revisar el recorrido. La API queda en `http://localhost:8000` y su health check en `http://localhost:8000/api/health`.
+La aplicación queda en `http://localhost:5173` y la API en `http://localhost:8000`. Compose
+aplica `alembic upgrade head` antes de arrancar el backend. La cookie de sesión se envía entre
+el frontend y la API; en producción debe configurarse `SESSION_HTTPS_ONLY=true` y usarse HTTPS.
 
-Para ver logs:
+## Funcionalidad disponible
 
-```bash
-docker compose logs -f backend frontend
-```
+- Registro, inicio, consulta y cierre de sesión.
+- Perfil por usuario con deportes, nivel, disponibilidad, zonas, preferencias y limitaciones.
+- Creación, consulta, actualización, activación y eliminación de objetivos. Solo puede haber un
+  objetivo activo por usuario.
+- Importación FIT/TCX/GPX y consulta de actividades del usuario autenticado.
+- Planificación semanal determinista: Generación de planes de la semana siguiente mediante un pipeline de reglas estructuradas que respetan la disponibilidad del usuario, nivel, equipamiento (potenciómetro explícito) y proximidad del objetivo.
+- Persistencia versionada e histórica: Generación de versiones correlativas aisladas por usuario, permitiendo consultar históricos y manteniendo un único plan activo por semana de forma atómica.
+- Vinculación plan–realizado: Registro de estados completado, omitido, parcial o sustituido para cada sesión, vinculación de actividades reales e historial correlativo de correcciones de manera insert-only.
+- Cumplimiento determinista y explicable: Cálculo semanal y acumulado por objetivo del cumplimiento basado en duraciones de forma 100% determinista en Python (ruleset `duration-v1`), con precisión Decimal, fingerprints canónicos para idempotencia e historial de revisiones.
+- Aislamiento de perfiles, objetivos, actividades y metadatos de archivos por identidad de
+  sesión. Los endpoints de producción no toman `user_id` del cliente.
 
-## Recorrido y API
-
-- Selecciona **Importar FIT, TCX o GPX** en la interfaz. El archivo se guarda en `storage/uploads/`, directorio excluido de Git.
-- `GET /api/activities?user_id=1` lista exclusivamente las sesiones de ese usuario.
-- `GET /api/activities/{id}?user_id=1` obtiene un detalle, manteniendo ese aislamiento hasta que exista autenticación.
-- `POST /api/activities/import?user_id=1` recibe un multipart `file` FIT, TCX o GPX y extrae fecha, nombre, deporte, duración, distancia, desnivel, frecuencia cardiaca, potencia, cadencia y calorías cuando el formato las contiene.
-
-Las métricas no presentes en un archivo se conservan como vacías. GPX y TCX se leen con la biblioteca XML estándar; FIT con `fitdecode`.
+Los archivos originales se guardan en el directorio configurado por `UPLOAD_DIR`, excluido de
+Git. Los formatos inválidos o ilegibles se rechazan y no conservan el archivo fallido.
 
 ## Desarrollo sin Docker
 
-Se requiere Python 3.12 y PostgreSQL. Configura `DATABASE_URL` en `.env`, instala el backend (`pip install -e '.[dev]'`), aplica `alembic upgrade head` desde `backend/` y ejecuta el seed indicado en el comando de Compose. Para el frontend: `cd frontend && npm install && npm run dev`.
+```bash
+cd backend
+pip install -e '.[dev]'
+alembic upgrade head
+uvicorn app.main:app --reload
+```
 
-Vite mostrará la URL local, normalmente `http://localhost:5173`.
+En otra terminal:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
 ## Controles de calidad
 
 ```bash
-cd frontend && npm run lint && npm run build
-cd backend && ruff check . && pytest
+cd backend
+ruff format --check .
+ruff check .
+pytest
+
+cd ../frontend
+npm run lint
+npm run build
 ```
 
-No se incluye entrenador IA ni planificación automática en esta entrega.
+Las pruebas backend cubren autenticación, acceso protegido, perfil, objetivos, aislamiento entre
+usuarios, importación de actividades, aislamiento de sus registros/archivos, parsing GPX,
+planificación semanal por pipeline, persistencia de planes/sesiones, versionado e idempotencia,
+vinculación plan-realizado (modelo versionado insert-only) y cumplimiento determinista semanal y por objetivo (precisiones Decimal, redondeo ROUND_HALF_UP, fingerprints canónicos y consistencias de checks en BD).
+
+## Fuera de esta entrega
+
+La base de conocimiento situada en `backend/app/coaching/knowledge/` y su endpoint protegido de
+depuración son preparación previa; no invocan ningún proveedor de IA. No se consideran terminados
+el análisis avanzado de carga o recuperación, ni la configuración de proveedores e integración con IA por usuario.

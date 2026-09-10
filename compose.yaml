@@ -22,6 +22,9 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-change-me-locally}@db:5432/${POSTGRES_DB:-app}
       UPLOAD_DIR: /app/data/uploads
       CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      COACHING_DEBUG_TOKEN: ${COACHING_DEBUG_TOKEN:-}
+      SESSION_SECRET: ${SESSION_SECRET:-local-development-only-change-me}
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
     command: sh -c "alembic upgrade head && python -c 'from app.database import SessionLocal; from app.services.demo import seed_demo_data; db=SessionLocal(); seed_demo_data(db); db.close()' && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
