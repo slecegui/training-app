@@ -1,6 +1,6 @@
 # Symfony gateway
 
-Pasarela Symfony mínima para introducir una entrada pública delante del backend Python de Training Online. La fase 3 añade un proxy autenticado y de solo lectura para exponer el perfil de la sesión Python existente.
+Pasarela Symfony mínima para introducir una entrada pública delante del backend Python de Training Online. La fase 4 añade lecturas autenticadas y de solo lectura de objetivos, reutilizando la sesión Python existente.
 
 Python sigue siendo la fuente de verdad de persistencia, importación FIT/TCX/GPX, parseo GPX, planificación, vinculación de sesiones y cálculo determinista de cumplimiento.
 
@@ -31,6 +31,8 @@ No se configuran credenciales de usuario, JWT, cookies, `user_id`, base de datos
 - `GET /health/ready`: readiness. Llama a `GET {PYTHON_API_BASE_URL}/api/health`. Devuelve `200` si Python responde con HTTP 200 y JSON `{ "status": "ok" }`; en cualquier error devuelve `503` sin revelar detalles internos.
 - `GET /api/auth/session`: proxy transparente de solo lectura a `GET {PYTHON_API_BASE_URL}/api/auth/session`. Reenvía únicamente la cookie configurada y devuelve el JSON `UserRead` o los errores semánticos `401`, `403`, `404` y `422` de Python.
 - `GET /api/profile`: proxy transparente de solo lectura a `GET {PYTHON_API_BASE_URL}/api/profile`. Reutiliza la cookie de sesión permitida, devuelve sin transformar el JSON `AthleteProfileRead` y conserva los errores semánticos `401`, `403`, `404` y `422` de Python. Incluye `Cache-Control: private, no-store` y no usa caché compartida.
+- `GET /api/goals`: proxy transparente de solo lectura a `GET {PYTHON_API_BASE_URL}/api/goals`. Devuelve sin transformar el array JSON de `GoalRead`.
+- `GET /api/goals/{goal_id}`: proxy transparente de solo lectura a `GET {PYTHON_API_BASE_URL}/api/goals/{goal_id}`. El identificador se valida como segmento numérico seguro y se codifica para la URL upstream; no se usa para autorizar.
 
 Los endpoints devuelven JSON. Readiness y el proxy de sesión preservan un `X-Request-Id` válido o generan uno seguro, lo propagan al upstream y lo devuelven al cliente. El proxy descarta cookies no permitidas y solo reenvía `Set-Cookie` si pertenece a la cookie de sesión configurada, conservando sus atributos de seguridad.
 
@@ -40,13 +42,15 @@ La sesión es transparente: Symfony no deserializa la cookie firmada de Starlett
 
 Symfony no acepta identidad desde query string, body, `Authorization`, JWT, `X-User-Id`, `X-Forwarded-User` u otras cabeceras. Tampoco reenvía el encabezado `Cookie` original completo: extrae mediante el parser de cookies del framework solo la cookie cuyo nombre coincide con `PYTHON_SESSION_COOKIE_NAME`.
 
+Los objetivos y sus metadatos GPX incluidos en `GoalRead` pasan transparentemente. Symfony no calcula, parsea ni almacena datos GPX; Python sigue resolviendo la sesión y comprobando la propiedad del objetivo.
+
 ## Alcance excluido
 
-No se migran rutas de negocio `/api`, login, registro, logout, JWT, identidad interna firmada, HMAC/mTLS, operaciones de escritura, lógica de negocio, entidades Doctrine, migraciones, PostgreSQL, archivos de usuario, almacenamiento Symfony ni Python, ni frontend.
+No se migran mutaciones de objetivos, filtros, paginación, activación, login, registro, logout, JWT, identidad interna firmada, HMAC/mTLS, operaciones de escritura, subida o borrado de GPX, lógica de negocio, entidades Doctrine, migraciones, PostgreSQL, archivos de usuario, almacenamiento Symfony ni Python, ni frontend.
 
 ## Siguiente fase
 
-La fase 4 podrá abordar lecturas de objetivos o actividades, previa definición del contrato y sus límites. Todavía no están implementados login, logout, JWT, identidad interna firmada, HMAC/mTLS ni operaciones de negocio.
+La fase 5 podrá abordar lecturas de actividades o mutaciones simples, previa definición del contrato y aprobación. Todavía no están implementados login, logout, JWT, identidad interna firmada, HMAC/mTLS ni operaciones de negocio.
 
 ## Rollback
 

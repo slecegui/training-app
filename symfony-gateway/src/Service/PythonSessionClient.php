@@ -30,6 +30,20 @@ final class PythonSessionClient
         return $this->requestReadOnly($request, $requestId, '/api/profile');
     }
 
+    public function requestGoals(Request $request, string $requestId): ResponseInterface
+    {
+        return $this->requestReadOnly($request, $requestId, '/api/goals');
+    }
+
+    public function requestGoal(Request $request, string $requestId, string $goalId): ResponseInterface
+    {
+        if (preg_match('/^[0-9]+$/D', $goalId) !== 1) {
+            throw new \InvalidArgumentException('The goal identifier is invalid.');
+        }
+
+        return $this->requestReadOnly($request, $requestId, '/api/goals/'.rawurlencode($goalId));
+    }
+
     /** @return list<string> */
     public function allowedSessionCookies(ResponseInterface $upstream): array
     {
