@@ -28,3 +28,7 @@ storage/uploads/
 .vscode/
 .idea/
 .aider*
+
+# Graphify generated artifacts
+/graphify-out/
+/frontend/graphify-out/

@@ -8,3 +8,9 @@
 - Datos, consultas, archivos importados, credenciales y proveedor IA se aíslan estrictamente por usuario. La identidad autenticada debe determinar el usuario efectivo; no se acepta un `user_id` controlado por el cliente como frontera de seguridad en funcionalidades de producción.
 - No se considera un hito completo por disponer solo de modelos, esquemas o migraciones: exige migración aplicable, servicio/reglas, endpoint autenticado, interfaz cuando corresponda y pruebas de comportamiento y aislamiento.
 - Preservar cambios existentes del árbol de trabajo. Antes de cambios materiales, inspeccionar el estado con Git; después, actualizar Graphify y ejecutar las comprobaciones aplicables de backend, frontend, migraciones, servicios y endpoints.
+
+# Repository instructions
+
+- Before answering questions about the codebase or making code changes, use Graphify as the first discovery step. If `graphify-out/graph.json` exists, query it; otherwise build or update the graph as permitted by the environment, then use it to trace the relevant flow. Report any environment limitation that prevents Graphify extraction.
+- When the user requests commits, use an English Conventional Commit-style message in the format `type(scope): description`, where `type` describes the change and `scope` identifies the affected module or domain. Example: `feat(sga): require approval for outbound orders`.
+- Stage and commit only files modified for the requested task. Never include unrelated or pre-existing worktree changes.
