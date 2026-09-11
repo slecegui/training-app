@@ -1,0 +1,36 @@
+parameters:
+    python_api_base_url: '%env(PYTHON_API_BASE_URL)%'
+    python_http_connect_timeout: '%env(float:PYTHON_HTTP_CONNECT_TIMEOUT)%'
+    python_http_read_timeout: '%env(float:PYTHON_HTTP_READ_TIMEOUT)%'
+    python_session_cookie_name: '%env(PYTHON_SESSION_COOKIE_NAME)%'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+
+    App\Service\PythonHealthClient:
+        arguments:
+            $baseUrl: '%python_api_base_url%'
+            $connectTimeout: '%python_http_connect_timeout%'
+            $readTimeout: '%python_http_read_timeout%'
+
+    App\Controller\SessionController:
+        arguments:
+            $sessionCookieName: '%python_session_cookie_name%'
+
+    App\Service\PythonSessionClient:
+        arguments:
+            $baseUrl: '%python_api_base_url%'
+            $sessionCookieName: '%python_session_cookie_name%'
+            $connectTimeout: '%python_http_connect_timeout%'
+            $readTimeout: '%python_http_read_timeout%'
+
+    Symfony\Contracts\HttpClient\HttpClientInterface:
+        alias: http_client
+        public: true

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.5/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheDirectory="var/cache/phpunit"
+         colors="true">
+    <php>
+        <server name="APP_ENV" value="test" force="true" />
+        <server name="APP_DEBUG" value="1" force="true" />
+        <server name="APP_SECRET" value="test-secret" force="true" />
+        <server name="KERNEL_CLASS" value="App\Kernel" force="true" />
+        <server name="PYTHON_API_BASE_URL" value="http://python.test" force="true" />
+        <server name="PYTHON_HTTP_CONNECT_TIMEOUT" value="0.1" force="true" />
+        <server name="PYTHON_HTTP_READ_TIMEOUT" value="0.2" force="true" />
+        <server name="PYTHON_SESSION_COOKIE_NAME" value="session" force="true" />
+    </php>
+    <testsuites>
+        <testsuite name="Symfony Gateway">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
