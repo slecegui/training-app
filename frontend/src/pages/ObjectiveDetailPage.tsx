@@ -1,12 +1,29 @@
 import { ChangeEvent, useEffect, useState, useCallback } from 'react'
-import { Goal, Activity, WeeklyPlanRead, WeeklyPlanHistoryRead, ComplianceSummaryRead, ComplianceComponentRead, PlannedSessionResultRead } from '../types'
+import { Goal, GoalRoute, Activity, WeeklyPlanRead, WeeklyPlanHistoryRead, ComplianceSummaryRead, ComplianceComponentRead, PlannedSessionResultRead } from '../types'
 import { request, useLocation, errorText, jsonHeaders, duration, distance } from '../utils'
 import { Input } from '../components/Common'
 import { GoalForm } from '../components/GoalForm'
+import { Icon as SharedIcon, IconName } from '../components/Icon'
 
 interface ObjectiveDetailPageProps {
   goalId: string
   setMessage: (value: string) => void
+}
+
+type RouteDraftStatus = 'pending' | 'uploading' | 'success' | 'error'
+interface RouteDraft {
+  id: string
+  file: File
+  stageLabel: string
+  displayOrder: number
+  status: RouteDraftStatus
+  error?: string
+}
+
+type GoalIconName = Extract<IconName, 'target' | 'edit' | 'trash' | 'route' | 'calendar' | 'activity' | 'upload' | 'plus' | 'check'>
+
+function GoalIcon({ name }: { name: GoalIconName }) {
+  return <SharedIcon name={name} className="goal-icon" />
 }
 
 export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageProps) {
@@ -17,6 +34,13 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
 
   // Sub-sections states
   const [activities, setActivities] = useState<Activity[]>([])
+  const [routes, setRoutes] = useState<GoalRoute[]>([])
+  const [routePanelOpen, setRoutePanelOpen] = useState(false)
+  const [routeDrafts, setRouteDrafts] = useState<RouteDraft[]>([])
+  const [routeUploading, setRouteUploading] = useState(false)
+  const [editingRouteId, setEditingRouteId] = useState<number | null>(null)
+  const [routeLabelDraft, setRouteLabelDraft] = useState('')
+  const [routeOrderDraft, setRouteOrderDraft] = useState('0')
   const [refreshKey, setRefreshKey] = useState(0)
 
   // Plan & sessions states
@@ -63,7 +87,11 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
   useEffect(() => {
     if (!goal) return
 
-    // 1. Fetch activities of this goal
+    // 1. Fetch routes and activities of this goal
+    void request(`/goals/${goal.id}/routes`).then(async (res) => {
+      if (res.ok) setRoutes(await res.json())
+    })
+
     void request(`/goals/${goal.id}/activities`).then(async (res) => {
       if (res.ok) {
         const data = await res.json()
@@ -208,11 +236,78 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
     }
     event.target.value = ''
   }
-  const removeRoute = async () => {
-    if (!goal || !confirm(`¿Eliminar el GPX “${goal.route_original_filename}”?`)) return
-    const response = await request(`/goals/${goal.id}/route-gpx`, { method: 'DELETE' })
+
+  const selectRouteFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []).filter((file) => file.name.toLowerCase().endsWith('.gpx'))
+    setRouteDrafts(files.map((file, index) => ({
+      id: `${file.name}-${file.lastModified}-${index}`,
+      file,
+      stageLabel: '',
+      displayOrder: routes.length + index,
+      status: 'pending'
+    })))
+    event.target.value = ''
+  }
+
+  const updateRouteDraft = (id: string, field: 'stageLabel' | 'displayOrder', value: string) => {
+    setRouteDrafts((drafts) => drafts.map((draft) => draft.id === id ? {
+      ...draft,
+      [field]: field === 'displayOrder' ? Number(value) : value
+    } : draft))
+  }
+
+  const uploadRouteDrafts = async () => {
+    if (!goal || routeDrafts.length === 0) return
+    setRouteUploading(true)
+    for (const draft of routeDrafts) {
+      if (draft.status === 'success') continue
+      setRouteDrafts((drafts) => drafts.map((item) => item.id === draft.id ? { ...item, status: 'uploading', error: undefined } : item))
+      const form = new FormData()
+      form.append('file', draft.file)
+      if (draft.stageLabel.trim()) form.append('stage_label', draft.stageLabel.trim())
+      form.append('display_order', String(Math.max(0, draft.displayOrder)))
+      try {
+        const response = await request(`/goals/${goal.id}/routes`, { method: 'POST', body: form })
+        if (!response.ok) throw new Error(await errorText(response))
+        const route: GoalRoute = await response.json()
+        setRoutes((current) => [...current, route].sort((a, b) => a.display_order - b.display_order || a.id - b.id))
+        setRouteDrafts((drafts) => drafts.map((item) => item.id === draft.id ? { ...item, status: 'success' } : item))
+      } catch (error) {
+        setRouteDrafts((drafts) => drafts.map((item) => item.id === draft.id ? {
+          ...item,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'No se pudo subir el archivo.'
+        } : item))
+      }
+    }
+    setRouteUploading(false)
+  }
+
+  const startRouteEdit = (route: GoalRoute) => {
+    setEditingRouteId(route.id)
+    setRouteLabelDraft(route.stage_label ?? '')
+    setRouteOrderDraft(String(route.display_order))
+  }
+
+  const saveRouteEdit = async (routeId: number) => {
+    if (!goal) return
+    const response = await request(`/goals/${goal.id}/routes/${routeId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify({ stage_label: routeLabelDraft.trim() || null, display_order: Math.max(0, Number(routeOrderDraft) || 0) })
+    })
     if (!response.ok) return setMessage(await errorText(response))
-    setGoal({ ...goal, route_original_filename: null, route_size_bytes: null, route_uploaded_at: null, route_distance_meters: null, route_elevation_gain_meters: null, route_start_latitude: null, route_start_longitude: null, route_end_latitude: null, route_end_longitude: null, route_bounds: null })
+    const updated: GoalRoute = await response.json()
+    setRoutes((current) => [...current.filter((route) => route.id !== routeId), updated].sort((a, b) => a.display_order - b.display_order || a.id - b.id))
+    setEditingRouteId(null)
+    setMessage('Metadatos de la ruta actualizados.')
+  }
+
+  const deleteRoute = async (route: GoalRoute) => {
+    if (!goal || !confirm(`¿Eliminar la ruta “${route.original_filename}”${route.stage_label ? ` (${route.stage_label})` : ''}?`)) return
+    const response = await request(`/goals/${goal.id}/routes/${route.id}`, { method: 'DELETE' })
+    if (!response.ok) return setMessage(await errorText(response))
+    setRoutes((current) => current.filter((item) => item.id !== route.id))
     setMessage('Ruta GPX eliminada.')
   }
 
@@ -425,9 +520,9 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
     }
 
     return (
-      <div className="panel" style={{ marginTop: '1.5rem' }}>
+      <div className="panel weekly-plan-table" style={{ marginTop: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h4>📅 Vista de Plan Semanal ({viewedPlan.start_date} al {viewedPlan.end_date})</h4>
+          <h4><GoalIcon name="calendar" /> Vista de plan semanal ({viewedPlan.start_date} al {viewedPlan.end_date})</h4>
           {history.length > 1 && (
             <label style={{ fontSize: '0.8rem' }}>
               Versión:
@@ -474,27 +569,28 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
 
   return (
     <>
-      <header style={{ marginBottom: '2rem' }}>
-        <div>
-          <span className="badge" style={{ background: goal.is_active ? 'var(--primary)' : '#666', color: '#fff', padding: '4px 8px', borderRadius: '4px' }}>
-            {goal.is_active ? 'Objetivo Activo' : 'Objetivo Inactivo'}
+      <header className="goal-detail-header">
+        <div className="goal-detail-heading">
+          <span className={`goal-status ${goal.is_active ? 'is-active' : ''}`}>
+            <span className="status-dot" aria-hidden="true" />
+            {goal.is_active ? 'Objetivo activo' : 'Objetivo inactivo'}
           </span>
-          <h1 style={{ marginTop: '0.5rem' }}>{goal.title}</h1>
-          <p className="subtitle" style={{ margin: 0 }}>
+          <h1>{goal.title}</h1>
+          <p className="subtitle">
             Periodo de preparación: <strong>{goal.start_date ? new Date(goal.start_date + 'T00:00:00').toLocaleDateString('es-ES') : '—'}</strong> al <strong>{new Date(goal.target_date + 'T00:00:00').toLocaleDateString('es-ES')}</strong>
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div className="goal-detail-actions">
           {!goal.is_active && (
-            <button className="primary" type="button" onClick={() => void handleActivate()}>
-              ⚡ Activar Objetivo
+            <button className="secondary" type="button" onClick={() => void handleActivate()}>
+              <GoalIcon name="check" /> Activar objetivo
             </button>
           )}
           <button className="secondary" type="button" onClick={() => setIsEditing(!isEditing)}>
-            ✏️ {isEditing ? 'Ver Espacio' : 'Editar Datos'}
+            <GoalIcon name="edit" /> {isEditing ? 'Ver objetivo' : 'Editar datos'}
           </button>
-          <button className="secondary" style={{ background: '#fae1dc', color: '#c62828' }} type="button" onClick={() => void handleDelete()}>
-            🗑️ Eliminar
+          <button className="secondary danger-button" type="button" onClick={() => void handleDelete()}>
+            <GoalIcon name="trash" /> Eliminar
           </button>
         </div>
       </header>
@@ -505,31 +601,89 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
           <GoalForm goal={goal} onSuccess={() => setIsEditing(false)} onCancel={() => setIsEditing(false)} setMessage={setMessage} />
         </section>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div className="goal-detail-sections">
           {/* 1. Header / Resumen de métrica */}
-          <section className="panel" style={{ background: 'var(--bg-card)', padding: '1.5rem' }}>
-            <h4>Métrica de Éxito Establecida</h4>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-              <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>🎯 {goal.success_metric}</span>
+          <section className="panel goal-metric-panel">
+            <p className="eyebrow">Métrica de éxito establecida</p>
+            <div className="goal-metric-content">
+              <strong><GoalIcon name="target" />{goal.success_metric}</strong>
               {goal.details && <p style={{ margin: 0, fontStyle: 'italic', color: '#666' }}>"{goal.details}"</p>}
             </div>
           </section>
-          <section className="panel">
-            <h3>🗺️ Ruta GPX del evento</h3>
-            {goal.route_original_filename ? <>
-              <p><strong>{goal.route_original_filename}</strong> · {goal.route_size_bytes ? `${(goal.route_size_bytes / 1024).toFixed(1)} KB` : '—'}</p>
-              <p className="subtitle">Ruta extraída: {goal.route_distance_meters ? `${(goal.route_distance_meters / 1000).toFixed(1)} km` : '—'} · Desnivel positivo: {goal.route_elevation_gain_meters ? `${Math.round(goal.route_elevation_gain_meters)} m` : '—'}</p>
-              <button className="secondary danger-action" type="button" onClick={() => void removeRoute()}>Eliminar GPX</button>
-            </> : <p className="subtitle">No hay ruta GPX adjunta. Puedes añadirla al editar el objetivo.</p>}
+          <section className="panel goal-routes-panel">
+            <div className="section-heading goal-section-heading">
+              <div>
+                <p className="eyebrow"><GoalIcon name="route" /> Rutas del objetivo</p>
+                <h2>Recorridos por etapa</h2>
+                <p className="subtitle">Añade una ruta por etapa o día. La distancia y el desnivel se calculan desde el GPX.</p>
+              </div>
+              <button className="primary" type="button" onClick={() => setRoutePanelOpen(!routePanelOpen)}>
+                <GoalIcon name="plus" /> Añadir ruta GPX
+              </button>
+            </div>
+
+            {routePanelOpen && (
+              <div className="route-upload-panel">
+                <label className="route-file-picker">
+                  <span>Seleccionar uno o varios archivos GPX</span>
+                  <input type="file" accept=".gpx,application/gpx+xml" multiple onChange={selectRouteFiles} />
+                </label>
+                {routeDrafts.length > 0 && (
+                  <div className="route-draft-list">
+                    {routeDrafts.map((draft) => (
+                      <div className="route-draft" key={draft.id}>
+                        <div className="route-draft-file"><strong>{draft.file.name}</strong><small>{(draft.file.size / 1024).toFixed(1)} KB</small></div>
+                        <label>Etapa o día<input value={draft.stageLabel} onChange={(event) => updateRouteDraft(draft.id, 'stageLabel', event.target.value)} maxLength={120} disabled={draft.status === 'uploading' || draft.status === 'success'} /></label>
+                        <label>Orden<input type="number" min="0" value={draft.displayOrder} onChange={(event) => updateRouteDraft(draft.id, 'displayOrder', event.target.value)} disabled={draft.status === 'uploading' || draft.status === 'success'} /></label>
+                        <span className={`route-upload-status is-${draft.status}`} role={draft.status === 'error' ? 'alert' : undefined}>
+                          {draft.status === 'pending' ? 'Pendiente' : draft.status === 'uploading' ? 'Subiendo…' : draft.status === 'success' ? 'Subida' : draft.error}
+                        </span>
+                      </div>
+                    ))}
+                    <button className="primary route-upload-submit" type="button" onClick={() => void uploadRouteDrafts()} disabled={routeUploading || routeDrafts.every((draft) => draft.status === 'success')}>
+                      <GoalIcon name="upload" /> {routeUploading ? 'Subiendo rutas…' : 'Subir rutas seleccionadas'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {routes.length === 0 ? (
+              <div className="compact-empty-state">
+                <GoalIcon name="route" />
+                <div><strong>Aún no hay rutas asociadas</strong><p>Adjunta uno o varios GPX para organizar las etapas de este objetivo.</p></div>
+              </div>
+            ) : (
+              <div className="route-list" aria-label="Rutas del objetivo">
+                {routes.slice().sort((a, b) => a.display_order - b.display_order || a.id - b.id).map((route) => (
+                  <article className="route-row" key={route.id}>
+                    {editingRouteId === route.id ? (
+                      <div className="route-edit-grid">
+                        <label>Etapa o día<input value={routeLabelDraft} onChange={(event) => setRouteLabelDraft(event.target.value)} maxLength={120} /></label>
+                        <label>Orden<input type="number" min="0" value={routeOrderDraft} onChange={(event) => setRouteOrderDraft(event.target.value)} /></label>
+                        <div className="route-row-actions"><button className="primary" type="button" onClick={() => void saveRouteEdit(route.id)}>Guardar</button><button className="secondary" type="button" onClick={() => setEditingRouteId(null)}>Cancelar</button></div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="route-order" aria-label={`Orden ${route.display_order + 1}`}>{route.display_order + 1}</div>
+                        <div className="route-row-main"><strong>{route.stage_label || `Ruta ${route.display_order + 1}`}</strong><span>{route.original_filename}</span></div>
+                        <div className="route-row-metrics"><span>{route.distance_meters != null ? `${(route.distance_meters / 1000).toFixed(1)} km` : '—'}</span><span>{route.elevation_gain_meters != null ? `${Math.round(route.elevation_gain_meters)} m+` : '—'}</span><small>{new Date(route.uploaded_at).toLocaleDateString('es-ES')}</small></div>
+                        <div className="route-row-actions"><button className="link-button" type="button" onClick={() => startRouteEdit(route)}>Editar</button><button className="link-button danger-link" type="button" onClick={() => void deleteRoute(route)}>Eliminar</button></div>
+                      </>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* 2. Planificación Semanal */}
-          <section className="panel">
+          <section className="panel goal-work-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>📅 Planificación Semanal</h3>
+              <h3><GoalIcon name="calendar" /> Planificación semanal</h3>
               {!activePlan && goal.is_active && (
                 <button className="primary" onClick={() => void handleGeneratePlan(false)}>
-                  ➕ Generar Plan Semanal
+                  <GoalIcon name="plus" /> Generar plan semanal
                 </button>
               )}
               {activePlan && (
@@ -551,14 +705,14 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
           </section>
 
           {/* 3. Actividades del objetivo */}
-          <section className="panel">
+          <section className="panel goal-work-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div>
-                <h3>🚴 Actividades del Objetivo</h3>
+                <h3><GoalIcon name="activity" /> Actividades del objetivo</h3>
                 <p className="subtitle" style={{ margin: 0 }}>Listado de entrenamientos deportivos realizados e importados dentro del periodo del objetivo.</p>
               </div>
               <label className="import">
-                📥 Importar FIT/TCX/GPX para Objetivo
+                <GoalIcon name="upload" /> Importar FIT/TCX/GPX para objetivo
                 <input type="file" accept=".fit,.tcx,.gpx" onChange={handleUploadActivity} />
               </label>
             </div>
@@ -605,7 +759,7 @@ export function ObjectiveDetailPage({ goalId, setMessage }: ObjectiveDetailPageP
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                 <div>
                   <span className="badge" style={{ background: '#7e57c2', color: '#fff' }}>Regla: {compliance.ruleset_version} (rev {compliance.revision})</span>
-                  <h3 style={{ margin: '0.5rem 0 0 0' }}>📈 Cumplimiento Semanal</h3>
+                  <h3 style={{ margin: '0.5rem 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}><GoalIcon name="activity" /> Cumplimiento semanal</h3>
                 </div>
                 <button className="primary" style={{ background: '#7e57c2', fontSize: '0.85rem' }} type="button" disabled={calculatingCompliance} onClick={() => void recalculateCompliance()}>
                   {calculatingCompliance ? 'Calculando...' : 'Recalcular'}

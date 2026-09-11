@@ -104,6 +104,24 @@ export interface Goal {
   route_end_latitude: number | null
   route_end_longitude: number | null
   route_bounds: Record<string, number> | null
+  routes: GoalRoute[]
+}
+
+export interface GoalRoute {
+  id: number
+  goal_id: number
+  original_filename: string
+  uploaded_at: string
+  display_order: number
+  stage_label: string | null
+  size_bytes: number
+  distance_meters: number | null
+  elevation_gain_meters: number | null
+  start_latitude: number | null
+  start_longitude: number | null
+  end_latitude: number | null
+  end_longitude: number | null
+  bounds: Record<string, number> | null
 }
 
 export interface ComplianceComponentRead {

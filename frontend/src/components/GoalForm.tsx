@@ -23,7 +23,6 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
   const [successMetricValue, setSuccessMetricValue] = useState(goal?.success_metric_value?.toString() || '')
   const [details, setDetails] = useState(goal?.details || '')
   const [isActive, setIsActive] = useState(goal?.is_active || false)
-  const [routeFile, setRouteFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const getMetricLabelAndUnit = (mType: string) => {
@@ -115,11 +114,6 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
 
     if (res.ok) {
       const savedGoal: Goal = await res.json()
-      if (routeFile) {
-        const routeData = new FormData(); routeData.append('file', routeFile)
-        const routeResponse = await request(`/goals/${savedGoal.id}/route-gpx`, { method: 'POST', body: routeData })
-        if (!routeResponse.ok) { setMessage(`Objetivo guardado, pero no se pudo adjuntar el GPX: ${await errorText(routeResponse)}`); setSubmitting(false); return }
-      }
       onSuccess(savedGoal)
       setMessage(goal ? 'Objetivo actualizado correctamente.' : 'Objetivo creado correctamente.')
     } else {
@@ -133,7 +127,7 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
   return (
     <form className="form-grid" onSubmit={handleSubmit}>
       <div className="wide" style={{ borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
-        <h3>🎯 Sección 1: Detalles del Objetivo</h3>
+        <h3>Sección 1: Detalles del objetivo</h3>
       </div>
       <Input
         label="Nombre del objetivo (Ej. Quebrantahuesos 2027)"
@@ -190,7 +184,7 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
       </label>
 
       <div className="wide" style={{ borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '0.5rem', marginTop: '1rem', marginBottom: '0.5rem' }}>
-        <h3>📊 Sección 2: Resultado Esperado y Métricas</h3>
+        <h3>Sección 2: Resultado esperado y métricas</h3>
       </div>
 
       <label>
@@ -239,7 +233,7 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
       )}
 
       <div className="wide" style={{ borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '0.5rem', marginTop: '1rem', marginBottom: '0.5rem' }}>
-        <h3>🗺️ Sección 3: Recorrido y Fechas</h3>
+        <h3>Sección 3: Recorrido y fechas</h3>
       </div>
 
       <Input
@@ -315,11 +309,6 @@ export function GoalForm({ goal, onSuccess, onCancel, setMessage }: GoalFormProp
           placeholder="Escribe cualquier información del puerto, altimetrías, logística o limitaciones..."
           onChange={(e) => setDetails(e.target.value)}
         />
-      </label>
-      <label className="wide">
-        Ruta GPX del evento (opcional, máximo 5 MB)
-        <input type="file" accept=".gpx,application/gpx+xml" onChange={(event) => setRouteFile(event.target.files?.[0] ?? null)} />
-        {goal?.route_original_filename && <small>Archivo actual: {goal.route_original_filename}. El nuevo archivo lo reemplazará.</small>}
       </label>
       <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '-0.5rem', gridColumn: '1 / -1' }}>
         Caracteres: {details.length} / 1000

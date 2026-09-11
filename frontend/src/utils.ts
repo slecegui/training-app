@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export const api = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api'
 export const request = (path: string, init?: RequestInit) => fetch(`${api}${path}`, { credentials: 'include', ...init })
@@ -11,10 +11,10 @@ export function useLocation() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
-  const navigate = (to: string) => {
+  const navigate = useCallback((to: string) => {
     window.history.pushState(null, '', to)
     window.dispatchEvent(new PopStateEvent('popstate'))
-  }
+  }, [])
   return [path, navigate] as const
 }
 
