@@ -99,7 +99,9 @@ class Goal(Base):
     route_original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     route_stored_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     route_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    route_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    route_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     route_distance_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     route_elevation_gain_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     route_start_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -107,6 +109,32 @@ class Goal(Base):
     route_end_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     route_end_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     route_bounds: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    routes: Mapped[list["GoalRoute"]] = relationship(
+        back_populates="goal",
+        cascade="all, delete-orphan",
+        order_by="GoalRoute.display_order, GoalRoute.id",
+    )
+
+
+class GoalRoute(Base):
+    __tablename__ = "goal_routes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), index=True)
+    original_filename: Mapped[str] = mapped_column(String(255))
+    stored_filename: Mapped[str] = mapped_column(String(255), unique=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+    stage_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    distance_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_gain_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bounds: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    goal: Mapped[Goal] = relationship(back_populates="routes")
 
 
 class WellnessEntry(Base):

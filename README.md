@@ -25,6 +25,9 @@ el frontend y la API; en producción debe configurarse `SESSION_HTTPS_ONLY=true`
 - Perfil por usuario con deportes, nivel, disponibilidad, zonas, preferencias y limitaciones.
 - Creación, consulta, actualización, activación y eliminación de objetivos. Solo puede haber un
   objetivo activo por usuario.
+- Cada objetivo puede tener cero, una o varias rutas GPX. Las rutas nuevas se gestionan con
+  endpoints autenticados propios; el endpoint legado `/route-gpx` se conserva temporalmente y
+  proyecta únicamente la primera ruta para compatibilidad.
 - Importación FIT/TCX/GPX y consulta de actividades del usuario autenticado.
 - Planificación semanal determinista: Generación de planes de la semana siguiente mediante un pipeline de reglas estructuradas que respetan la disponibilidad del usuario, nivel, equipamiento (potenciómetro explícito) y proximidad del objetivo.
 - Persistencia versionada e histórica: Generación de versiones correlativas aisladas por usuario, permitiendo consultar históricos y manteniendo un único plan activo por semana de forma atómica.
@@ -35,6 +38,8 @@ el frontend y la API; en producción debe configurarse `SESSION_HTTPS_ONLY=true`
 
 Los archivos originales se guardan en el directorio configurado por `UPLOAD_DIR`, excluido de
 Git. Los formatos inválidos o ilegibles se rechazan y no conservan el archivo fallido.
+Python sigue siendo la fuente de verdad para validar y extraer los metadatos deterministas de
+GPX; los valores manuales del objetivo no se sobrescriben al cargar rutas.
 
 ## Desarrollo sin Docker
 

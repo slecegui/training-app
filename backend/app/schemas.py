@@ -247,6 +247,29 @@ class GoalInput(BaseModel):
         return self
 
 
+class GoalRouteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    goal_id: int
+    original_filename: str
+    uploaded_at: datetime
+    display_order: int
+    stage_label: str | None = None
+    size_bytes: int
+    distance_meters: float | None = None
+    elevation_gain_meters: float | None = None
+    start_latitude: float | None = None
+    start_longitude: float | None = None
+    end_latitude: float | None = None
+    end_longitude: float | None = None
+    bounds: dict | None = None
+
+
+class GoalRouteUpdate(BaseModel):
+    stage_label: str | None = Field(default=None, max_length=120)
+    display_order: int = Field(default=0, ge=0, le=10000)
+
+
 class GoalRead(GoalInput):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -260,6 +283,7 @@ class GoalRead(GoalInput):
     route_end_latitude: float | None = None
     route_end_longitude: float | None = None
     route_bounds: dict | None = None
+    routes: list[GoalRouteRead] = Field(default_factory=list)
 
 
 class PlannedSessionResultRead(BaseModel):

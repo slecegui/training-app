@@ -4,7 +4,17 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, select, update
 from sqlalchemy.orm import Session
@@ -19,6 +29,7 @@ from app.models import (
     AthleteProfile,
     ComplianceSummary,
     Goal,
+    GoalRoute,
     PlannedSession,
     PlannedSessionResult,
     User,
@@ -35,6 +46,8 @@ from app.schemas import (
     GoalComplianceCalculateRequest,
     GoalInput,
     GoalRead,
+    GoalRouteRead,
+    GoalRouteUpdate,
     LoginRequest,
     PlannedSessionResultRead,
     RegisterRequest,
@@ -45,11 +58,11 @@ from app.schemas import (
 )
 from app.services.activity_parser import parse_activity_file
 from app.services.activity_service import ActivityService
-from app.services.goal_gpx_service import MAX_GPX_BYTES, parse_goal_gpx
 from app.services.compliance_service import (
     ComplianceDomainService,
     PlanNotFoundException,
 )
+from app.services.goal_gpx_service import MAX_GPX_BYTES, parse_goal_gpx
 from app.services.planner import (
     DeterministicPlannerService,
     NoActiveGoalException,
@@ -103,6 +116,96 @@ def activate_goal(goal: Goal, db: Session) -> None:
     """Only one active goal exists per user; activating one atomically deactivates the rest."""
     db.execute(update(Goal).where(Goal.user_id == goal.user_id).values(is_active=False))
     goal.is_active = True
+
+
+LEGACY_ROUTE_FIELDS = {
+    "route_original_filename": "original_filename",
+    "route_size_bytes": "size_bytes",
+    "route_uploaded_at": "uploaded_at",
+    "route_distance_meters": "distance_meters",
+    "route_elevation_gain_meters": "elevation_gain_meters",
+    "route_start_latitude": "start_latitude",
+    "route_start_longitude": "start_longitude",
+    "route_end_latitude": "end_latitude",
+    "route_end_longitude": "end_longitude",
+    "route_bounds": "bounds",
+}
+
+
+def route_file_path(user_id: int, stored_filename: str) -> Path:
+    safe_name = Path(stored_filename).name
+    if (
+        safe_name != stored_filename
+        or len(safe_name) != 36
+        or safe_name[32:] != ".gpx"
+        or any(character not in "0123456789abcdef" for character in safe_name[:32].lower())
+    ):
+        raise ValueError("Referencia de archivo de ruta inválida")
+    return Path(get_settings().upload_dir) / "goal-routes" / str(user_id) / safe_name
+
+
+def sync_legacy_route_fields(goal: Goal, route: GoalRoute | None) -> None:
+    for legacy_field, route_field in LEGACY_ROUTE_FIELDS.items():
+        setattr(goal, legacy_field, getattr(route, route_field) if route else None)
+
+
+def validate_goal_route_upload(file: UploadFile) -> str:
+    original_filename = Path(file.filename or "").name
+    if Path(original_filename).suffix.lower() != ".gpx" or file.content_type not in {
+        "application/gpx+xml",
+        "application/xml",
+        "text/xml",
+        "",
+    }:
+        raise HTTPException(400, "Solo se admite un archivo GPX")
+    return original_filename
+
+
+async def read_goal_route_upload(file: UploadFile) -> tuple[str, bytes, dict]:
+    original_filename = validate_goal_route_upload(file)
+    raw = await file.read(MAX_GPX_BYTES + 1)
+    try:
+        metadata = parse_goal_gpx(raw)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return original_filename, raw, metadata
+
+
+def build_goal_route(
+    goal: Goal,
+    user_id: int,
+    original_filename: str,
+    raw: bytes,
+    metadata: dict,
+    stage_label: str | None,
+    display_order: int,
+) -> GoalRoute:
+    upload_dir = Path(get_settings().upload_dir) / "goal-routes" / str(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid4().hex}.gpx"
+    (upload_dir / stored_name).write_bytes(raw)
+    return GoalRoute(
+        goal=goal,
+        original_filename=original_filename,
+        stored_filename=stored_name,
+        uploaded_at=datetime.utcnow(),
+        display_order=display_order,
+        stage_label=stage_label.strip() if stage_label and stage_label.strip() else None,
+        size_bytes=len(raw),
+        **metadata,
+    )
+
+
+def get_goal_route_or_404(
+    goal_id: int, route_id: int, current_user: User, db: Session
+) -> GoalRoute:
+    goal = get_goal_or_404(goal_id, current_user, db)
+    route = db.scalar(
+        select(GoalRoute).where(GoalRoute.id == route_id, GoalRoute.goal_id == goal.id)
+    )
+    if not route:
+        raise HTTPException(404, "Ruta no encontrada")
+    return route
 
 
 @app.post("/api/auth/register", response_model=UserRead, status_code=201, tags=["auth"])
@@ -172,7 +275,9 @@ def get_activity(
 
 
 @app.delete("/api/activities/{activity_id}", status_code=204, tags=["activities"])
-def delete_activity(activity_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+def delete_activity(
+    activity_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Response:
     ActivityService().delete(activity_id, current_user, db, Path(get_settings().upload_dir))
     return Response(status_code=204)
 
@@ -350,37 +455,128 @@ def update_goal(
     return goal
 
 
-@app.post("/api/goals/{goal_id}/route-gpx", response_model=GoalRead, tags=["goals"])
-async def upload_goal_route_gpx(goal_id: int, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Goal:
+@app.get("/api/goals/{goal_id}/routes", response_model=list[GoalRouteRead], tags=["goals"])
+def list_goal_routes(
+    goal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[GoalRoute]:
     goal = get_goal_or_404(goal_id, current_user, db)
-    if Path(file.filename or "").suffix.lower() != ".gpx" or file.content_type not in {"application/gpx+xml", "application/xml", "text/xml", ""}:
-        raise HTTPException(400, "Solo se admite un archivo GPX")
-    raw = await file.read(MAX_GPX_BYTES + 1)
+    return list(goal.routes)
+
+
+@app.post(
+    "/api/goals/{goal_id}/routes", response_model=GoalRouteRead, status_code=201, tags=["goals"]
+)
+async def upload_goal_route(
+    goal_id: int,
+    file: UploadFile = File(...),
+    stage_label: str | None = Form(default=None),
+    display_order: int = Form(default=0, ge=0, le=10000),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> GoalRoute:
+    goal = get_goal_or_404(goal_id, current_user, db)
+    original_filename, raw, metadata = await read_goal_route_upload(file)
+    route = build_goal_route(
+        goal, current_user.id, original_filename, raw, metadata, stage_label, display_order
+    )
+    db.add(route)
     try:
-        metadata = parse_goal_gpx(raw)
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
+        db.commit()
+        db.refresh(route)
+    except Exception:
+        db.rollback()
+        route_file_path(current_user.id, route.stored_filename).unlink(missing_ok=True)
+        raise
+    return route
+
+
+@app.patch("/api/goals/{goal_id}/routes/{route_id}", response_model=GoalRouteRead, tags=["goals"])
+def update_goal_route(
+    goal_id: int,
+    route_id: int,
+    payload: GoalRouteUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> GoalRoute:
+    route = get_goal_route_or_404(goal_id, route_id, current_user, db)
+    route.stage_label = (
+        payload.stage_label.strip() if payload.stage_label and payload.stage_label.strip() else None
+    )
+    route.display_order = payload.display_order
+    db.commit()
+    db.refresh(route)
+    return route
+
+
+@app.delete("/api/goals/{goal_id}/routes/{route_id}", status_code=204, tags=["goals"])
+def delete_goal_route(
+    goal_id: int,
+    route_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    route = get_goal_route_or_404(goal_id, route_id, current_user, db)
+    stored_name = route.stored_filename
+    db.delete(route)
+    db.commit()
+    route_file_path(current_user.id, stored_name).unlink(missing_ok=True)
+    return Response(status_code=204)
+
+
+@app.post("/api/goals/{goal_id}/route-gpx", response_model=GoalRead, tags=["goals"])
+async def upload_goal_route_gpx(
+    goal_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Goal:
+    goal = get_goal_or_404(goal_id, current_user, db)
+    original_filename, raw, metadata = await read_goal_route_upload(file)
     upload_dir = Path(get_settings().upload_dir) / "goal-routes" / str(current_user.id)
     upload_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid4().hex}.gpx"
     (upload_dir / stored_name).write_bytes(raw)
-    old_name = goal.route_stored_filename
-    goal.route_original_filename, goal.route_stored_filename = file.filename, stored_name
-    goal.route_size_bytes, goal.route_uploaded_at = len(raw), datetime.utcnow()
-    for key, value in metadata.items(): setattr(goal, key, value)
-    db.commit(); db.refresh(goal)
-    if old_name: (upload_dir / old_name).unlink(missing_ok=True)
+    old_route = goal.routes[0] if goal.routes else None
+    old_name = old_route.stored_filename if old_route else goal.route_stored_filename
+    if old_route:
+        old_route.original_filename = original_filename
+        old_route.stored_filename = stored_name
+        old_route.uploaded_at = datetime.utcnow()
+        old_route.size_bytes = len(raw)
+        for key, value in metadata.items():
+            setattr(old_route, key.removeprefix("route_"), value)
+        sync_legacy_route_fields(goal, old_route)
+    else:
+        route = build_goal_route(goal, current_user.id, original_filename, raw, metadata, None, 0)
+        db.add(route)
+        db.flush()
+        sync_legacy_route_fields(goal, route)
+    db.commit()
+    db.refresh(goal)
+    if old_name:
+        (upload_dir / old_name).unlink(missing_ok=True)
     return goal
 
 
 @app.delete("/api/goals/{goal_id}/route-gpx", status_code=204, tags=["goals"])
-def delete_goal_route_gpx(goal_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+def delete_goal_route_gpx(
+    goal_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Response:
     goal = get_goal_or_404(goal_id, current_user, db)
-    stored_name = goal.route_stored_filename
-    for field in ("route_original_filename", "route_stored_filename", "route_size_bytes", "route_uploaded_at", "route_distance_meters", "route_elevation_gain_meters", "route_start_latitude", "route_start_longitude", "route_end_latitude", "route_end_longitude", "route_bounds"):
-        setattr(goal, field, None)
+    route = goal.routes[0] if goal.routes else None
+    stored_name = route.stored_filename if route else goal.route_stored_filename
+    if route:
+        remaining_routes = [item for item in goal.routes if item.id != route.id]
+        db.delete(route)
+        db.flush()
+        sync_legacy_route_fields(goal, remaining_routes[0] if remaining_routes else None)
+    else:
+        sync_legacy_route_fields(goal, None)
     db.commit()
-    if stored_name: (Path(get_settings().upload_dir) / "goal-routes" / str(current_user.id) / stored_name).unlink(missing_ok=True)
+    if stored_name:
+        route_file_path(current_user.id, stored_name).unlink(missing_ok=True)
     return Response(status_code=204)
 
 
