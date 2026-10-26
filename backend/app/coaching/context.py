@@ -55,6 +55,7 @@ class ContextBuilder:
             "athlete_profile": self._profile(profile),
             "active_goal": self._goal(goal),
             "availability": profile.availability if profile else {},
+            "preferences": profile.preferences if profile else {},
             "recent_activities": [self._activity(item) for item in activities],
             "recent_wellness": [self._wellness(item) for item in wellness],
         }
@@ -93,6 +94,10 @@ class ContextBuilder:
                 "target_date": item.target_date,
                 "sport": item.sport,
                 "priority": item.priority,
+                "goal_type": item.goal_type,
+                "target_distance_meters": item.target_distance_meters,
+                "target_elevation_meters": item.target_elevation_meters,
+                "success_metric": item.success_metric,
                 "details": item.details,
             }
             if item

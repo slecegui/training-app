@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     upload_dir: str = "/app/data/uploads"
     cors_origins: str = "http://localhost:5173"
     coaching_debug_token: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash-lite"
     session_secret: str = "local-development-only-change-me"
     session_https_only: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

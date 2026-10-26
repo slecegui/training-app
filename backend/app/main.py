@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import get_current_user, hash_password, verify_password
 from app.coaching.context import ContextBuilder
+from app.coaching.gemini import CoachUnavailable, InvalidCoachProposal, propose_plan
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
@@ -599,6 +600,53 @@ def delete_goal(
     db.delete(goal)
     db.commit()
     return Response(status_code=204)
+
+
+@app.post("/api/coaching/plan-preview", tags=["coaching"])
+def preview_coached_plan(
+    payload: GeneratePlanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Preview a model proposal without changing the athlete's active plan."""
+    profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == current_user.id))
+    goal = db.scalar(select(Goal).where(Goal.user_id == current_user.id, Goal.is_active.is_(True)))
+    activities = list(db.scalars(select(Activity).where(Activity.user_id == current_user.id)))
+    try:
+        scaffold = DeterministicPlannerService().generate_plan(
+            user_id=current_user.id,
+            profile=profile,
+            goal=goal,
+            activities=activities,
+            reference_date=payload.reference_date,
+        )
+    except NoProfileException as error:
+        raise HTTPException(404, "Perfil deportivo no configurado.") from error
+    except (NoActiveGoalException, NoAvailabilityException) as error:
+        raise HTTPException(400, str(error)) from error
+    except PlannerDomainException as error:
+        raise HTTPException(422, str(error)) from error
+
+    context = ContextBuilder(db).build(current_user.id, "plan")
+    settings = get_settings()
+    try:
+        proposal = propose_plan(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+            context=context,
+            scaffold=scaffold.sessions,
+        )
+    except CoachUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    except InvalidCoachProposal as error:
+        raise HTTPException(422, str(error)) from error
+    return {
+        "start_date": scaffold.start_date,
+        "end_date": scaffold.end_date,
+        "active_goal_id": goal.id,
+        "preview_only": True,
+        **proposal,
+    }
 
 
 @app.post("/api/plans/generate", response_model=WeeklyPlanRead, status_code=201, tags=["plans"])
