@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class ActivityRead(BaseModel):
@@ -22,6 +22,7 @@ class ActivityRead(BaseModel):
     calories: int | None
     original_filename: str | None
     source_format: str
+    source_provider: str | None = None
     goal_id: int | None = None
 
 
@@ -85,6 +86,15 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str = Field(min_length=1, max_length=128)
+
+
+class GarminConnectRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: SecretStr
+
+
+class GarminMfaRequest(BaseModel):
+    code: SecretStr
 
 
 class AthleteProfileUpdate(BaseModel):

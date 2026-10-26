@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     coaching_debug_token: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-lite"
+    garmin_token_key: str = ""
     session_secret: str = "local-development-only-change-me"
     session_https_only: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

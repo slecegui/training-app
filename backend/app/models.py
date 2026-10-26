@@ -55,12 +55,29 @@ class Activity(Base):
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stored_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_format: Mapped[str] = mapped_column(String(10), default="demo")
+    source_provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    external_activity_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     user: Mapped[User] = relationship(back_populates="activities")
     goal_id: Mapped[int | None] = mapped_column(
         ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True
     )
     goal: Mapped["Goal | None"] = relationship()
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source_provider", "external_activity_id", name="uq_activity_external_source"
+        ),
+    )
+
+
+class GarminConnection(Base):
+    __tablename__ = "garmin_connections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    encrypted_tokens: Mapped[str] = mapped_column(Text)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class AthleteProfile(Base):

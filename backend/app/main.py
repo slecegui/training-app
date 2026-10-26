@@ -29,6 +29,7 @@ from app.models import (
     Activity,
     AthleteProfile,
     ComplianceSummary,
+    GarminConnection,
     Goal,
     GoalRoute,
     PlannedSession,
@@ -43,6 +44,8 @@ from app.schemas import (
     AthleteProfileUpdate,
     CoachDebugContext,
     ComplianceSummaryRead,
+    GarminConnectRequest,
+    GarminMfaRequest,
     GeneratePlanRequest,
     GoalComplianceCalculateRequest,
     GoalInput,
@@ -57,6 +60,7 @@ from app.schemas import (
     WeeklyPlanHistoryRead,
     WeeklyPlanRead,
 )
+from app.services import garmin_sync
 from app.services.activity_parser import parse_activity_file
 from app.services.activity_service import ActivityService
 from app.services.compliance_service import (
@@ -340,6 +344,68 @@ async def import_activity(
     db.commit()
     db.refresh(activity)
     return activity
+
+
+@app.get("/api/integrations/garmin/status", tags=["integrations"])
+def garmin_status(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> dict:
+    connection = db.scalar(
+        select(GarminConnection).where(GarminConnection.user_id == current_user.id)
+    )
+    return {
+        "available": garmin_sync.available(),
+        "connected": connection is not None,
+        "last_sync_at": connection.last_sync_at if connection else None,
+        "last_error": connection.last_error if connection else None,
+        "experimental": True,
+    }
+
+
+@app.post("/api/integrations/garmin/connect", tags=["integrations"])
+def garmin_connect(
+    payload: GarminConnectRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        status = garmin_sync.connect(
+            db, current_user.id, payload.email, payload.password.get_secret_value()
+        )
+        return {"status": status}
+    except garmin_sync.GarminUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@app.post("/api/integrations/garmin/mfa", tags=["integrations"])
+def garmin_mfa(
+    payload: GarminMfaRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        garmin_sync.finish_mfa(db, current_user.id, payload.code.get_secret_value())
+        return {"status": "connected"}
+    except garmin_sync.GarminUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@app.post("/api/integrations/garmin/sync", tags=["integrations"])
+def garmin_import(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> dict[str, int]:
+    try:
+        return garmin_sync.sync(db, current_user.id, Path(get_settings().upload_dir))
+    except garmin_sync.GarminUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@app.delete("/api/integrations/garmin", status_code=204, tags=["integrations"])
+def garmin_disconnect(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Response:
+    garmin_sync.disconnect(db, current_user.id)
+    return Response(status_code=204)
 
 
 @app.get(

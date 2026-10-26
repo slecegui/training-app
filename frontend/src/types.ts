@@ -19,6 +19,7 @@ export interface Activity {
   calories: number | null
   original_filename: string | null
   source_format: string
+  source_provider?: string | null
   goal_id: number | null
 }
 
